@@ -168,11 +168,19 @@ pub enum KeyboardImplementation {
 
 impl Default for KeyboardImplementation {
     fn default() -> Self {
-        // Default to HandyKeys only on macOS where it's well-tested.
-        // Windows and Linux use Tauri by default (handy-keys not sufficiently tested yet).
+        // Default to HandyKeys on macOS (well-tested) and on Linux+Wayland
+        // (Tauri global-shortcut uses X11 XGrabKey which silently fails on Wayland).
+        // Windows and Linux+X11 use Tauri by default.
         #[cfg(target_os = "macos")]
         return KeyboardImplementation::HandyKeys;
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "linux")]
+        {
+            if crate::utils::is_wayland() {
+                return KeyboardImplementation::HandyKeys;
+            }
+            return KeyboardImplementation::Tauri;
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         return KeyboardImplementation::Tauri;
     }
 }
@@ -759,6 +767,19 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
 
     if ensure_post_process_defaults(&mut settings) {
         store.set("settings", serde_json::to_value(&settings).unwrap());
+    }
+
+    // Migrate existing Linux+Wayland users from Tauri to HandyKeys.
+    // Tauri's global-shortcut plugin uses X11 XGrabKey which silently fails on Wayland.
+    #[cfg(target_os = "linux")]
+    {
+        if settings.keyboard_implementation == KeyboardImplementation::Tauri
+            && crate::utils::is_wayland()
+        {
+            debug!("Migrating keyboard implementation from Tauri to HandyKeys for Wayland compatibility");
+            settings.keyboard_implementation = KeyboardImplementation::HandyKeys;
+            store.set("settings", serde_json::to_value(&settings).unwrap());
+        }
     }
 
     settings
