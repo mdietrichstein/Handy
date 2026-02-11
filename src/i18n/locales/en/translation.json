@@ -55,6 +55,10 @@
       "moonshine-base": {
         "name": "Moonshine Base",
         "description": "Very fast, English only. Handles accents well."
+      },
+      "voxtral-4b": {
+        "name": "Voxtral 4B",
+        "description": "Mistral AI's realtime speech-to-text. GPU required (Vulkan/Metal)."
       }
     },
     "errors": {

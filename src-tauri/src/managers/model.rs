@@ -22,6 +22,7 @@ pub enum EngineType {
     Parakeet,
     Moonshine,
     SenseVoice,
+    Voxtral,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -43,6 +44,21 @@ pub struct ModelInfo {
     pub is_recommended: bool,       // Whether this is the recommended model for new users
     pub supported_languages: Vec<String>, // Languages this model can transcribe
     pub is_custom: bool,            // Whether this is a user-provided custom model
+    /// Optional list of individual files to download into the model directory.
+    /// Used for models hosted on HuggingFace where each file has its own URL.
+    /// When set, the download creates a directory (filename) and fetches each file into it.
+    /// The `url` field is ignored when `download_files` is non-empty.
+    pub download_files: Vec<ModelDownloadFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ModelDownloadFile {
+    /// URL to download this file from
+    pub url: String,
+    /// Filename to save as inside the model directory
+    pub name: String,
+    /// Expected size in bytes (0 if unknown, used for progress reporting)
+    pub size_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -113,6 +129,7 @@ impl ModelManager {
                 is_recommended: false,
                 supported_languages: whisper_languages.clone(),
                 is_custom: false,
+                download_files: vec![],
             },
         );
 
@@ -137,6 +154,7 @@ impl ModelManager {
                 is_recommended: false,
                 supported_languages: whisper_languages.clone(),
                 is_custom: false,
+                download_files: vec![],
             },
         );
 
@@ -160,6 +178,7 @@ impl ModelManager {
                 is_recommended: false,
                 supported_languages: whisper_languages.clone(),
                 is_custom: false,
+                download_files: vec![],
             },
         );
 
@@ -183,6 +202,7 @@ impl ModelManager {
                 is_recommended: false,
                 supported_languages: whisper_languages.clone(),
                 is_custom: false,
+                download_files: vec![],
             },
         );
 
@@ -207,6 +227,7 @@ impl ModelManager {
                 is_recommended: false,
                 supported_languages: whisper_languages,
                 is_custom: false,
+                download_files: vec![],
             },
         );
 
@@ -231,6 +252,7 @@ impl ModelManager {
                 is_recommended: false,
                 supported_languages: vec!["en".to_string()],
                 is_custom: false,
+                download_files: vec![],
             },
         );
 
@@ -264,6 +286,7 @@ impl ModelManager {
                 is_recommended: true,
                 supported_languages: parakeet_v3_languages,
                 is_custom: false,
+                download_files: vec![],
             },
         );
 
@@ -287,6 +310,7 @@ impl ModelManager {
                 is_recommended: false,
                 supported_languages: vec!["en".to_string()],
                 is_custom: false,
+                download_files: vec![],
             },
         );
 
@@ -318,6 +342,65 @@ impl ModelManager {
                 is_recommended: false,
                 supported_languages: sense_voice_languages,
                 is_custom: false,
+                download_files: vec![],
+            },
+        );
+
+        // Voxtral Realtime 4B (Mistral AI)
+        // 99 languages supported via Tekken tokenizer (same as Whisper language set)
+        let voxtral_languages: Vec<String> = vec![
+            "en", "zh", "zh-Hans", "zh-Hant", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr",
+            "pl", "ca", "nl", "ar", "sv", "it", "id", "hi", "fi", "vi", "he", "uk", "el", "ms",
+            "cs", "ro", "da", "hu", "ta", "no", "th", "ur", "hr", "bg", "lt", "la", "mi", "ml",
+            "cy", "sk", "te", "fa", "lv", "bn", "sr", "az", "sl", "kn", "et", "mk", "br", "eu",
+            "is", "hy", "ne", "mn", "bs", "kk", "sq", "sw", "gl", "mr", "pa", "si", "km", "sn",
+            "yo", "so", "af", "oc", "ka", "be", "tg", "sd", "gu", "am", "yi", "lo", "uz", "fo",
+            "ht", "ps", "tk", "nn", "mt", "sa", "lb", "my", "bo", "tl", "mg", "as", "tt", "haw",
+            "ln", "ha", "ba", "jw", "su", "yue",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+
+        let hf_base = "https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602/resolve/main";
+        available_models.insert(
+            "voxtral-4b".to_string(),
+            ModelInfo {
+                id: "voxtral-4b".to_string(),
+                name: "Voxtral 4B".to_string(),
+                description: "Mistral AI's realtime speech-to-text. GPU required (Vulkan/Metal)."
+                    .to_string(),
+                filename: "voxtral-model".to_string(),
+                url: None, // Multi-file download via download_files
+                size_mb: 8460, // ~8.9 GB total
+                is_downloaded: false,
+                is_downloading: false,
+                partial_size: 0,
+                is_directory: true,
+                engine_type: EngineType::Voxtral,
+                accuracy_score: 0.90,
+                speed_score: 0.70,
+                supports_translation: false,
+                is_recommended: false,
+                supported_languages: voxtral_languages,
+                is_custom: false,
+                download_files: vec![
+                    ModelDownloadFile {
+                        url: format!("{}/consolidated.safetensors", hf_base),
+                        name: "consolidated.safetensors".to_string(),
+                        size_bytes: 8_859_462_744,
+                    },
+                    ModelDownloadFile {
+                        url: format!("{}/tekken.json", hf_base),
+                        name: "tekken.json".to_string(),
+                        size_bytes: 14_910_348,
+                    },
+                    ModelDownloadFile {
+                        url: format!("{}/params.json", hf_base),
+                        name: "params.json".to_string(),
+                        size_bytes: 1_343,
+                    },
+                ],
             },
         );
 
@@ -406,15 +489,43 @@ impl ModelManager {
                     let _ = fs::remove_dir_all(&extracting_path);
                 }
 
-                model.is_downloaded = model_path.exists() && model_path.is_dir();
-                model.is_downloading = false;
+                if !model.download_files.is_empty() {
+                    // Multi-file model: downloaded only when all files are present
+                    model.is_downloaded = model_path.exists()
+                        && model_path.is_dir()
+                        && model.download_files.iter().all(|f| {
+                            let fp = model_path.join(&f.name);
+                            fp.exists()
+                                && (f.size_bytes == 0
+                                    || fp.metadata().map(|m| m.len()).unwrap_or(0) == f.size_bytes)
+                        });
 
-                // Get partial file size if it exists (for the .tar.gz being downloaded)
-                if partial_path.exists() {
-                    model.partial_size = partial_path.metadata().map(|m| m.len()).unwrap_or(0);
+                    // Partial size: sum of all .partial files inside the model dir
+                    let mut partial_total: u64 = 0;
+                    for f in &model.download_files {
+                        let pp = model_path.join(format!("{}.partial", &f.name));
+                        if pp.exists() {
+                            partial_total += pp.metadata().map(|m| m.len()).unwrap_or(0);
+                        }
+                        // Also count fully-downloaded files (for aggregate progress)
+                        let fp = model_path.join(&f.name);
+                        if fp.exists() {
+                            partial_total += fp.metadata().map(|m| m.len()).unwrap_or(0);
+                        }
+                    }
+                    model.partial_size = partial_total;
                 } else {
-                    model.partial_size = 0;
+                    model.is_downloaded = model_path.exists() && model_path.is_dir();
+
+                    // Get partial file size if it exists (for the .tar.gz being downloaded)
+                    if partial_path.exists() {
+                        model.partial_size =
+                            partial_path.metadata().map(|m| m.len()).unwrap_or(0);
+                    } else {
+                        model.partial_size = 0;
+                    }
                 }
+                model.is_downloading = false;
             } else {
                 // For file-based models (existing logic)
                 let model_path = self.models_dir.join(&model.filename);
@@ -589,6 +700,7 @@ impl ModelManager {
                     is_recommended: false,
                     supported_languages: vec![],
                     is_custom: true,
+                    download_files: vec![],
                 },
             );
         }
@@ -604,6 +716,11 @@ impl ModelManager {
 
         let model_info =
             model_info.ok_or_else(|| anyhow::anyhow!("Model not found: {}", model_id))?;
+
+        // Multi-file downloads (e.g. HuggingFace models with multiple files)
+        if !model_info.download_files.is_empty() {
+            return self.download_model_multifile(model_id, &model_info).await;
+        }
 
         let url = model_info
             .url
@@ -946,6 +1063,257 @@ impl ModelManager {
         Ok(())
     }
 
+    /// Download a model that consists of multiple individual files.
+    ///
+    /// Creates the model directory, downloads each file with resume support,
+    /// and reports aggregate progress. Used for HuggingFace-hosted models.
+    async fn download_model_multifile(
+        &self,
+        model_id: &str,
+        model_info: &ModelInfo,
+    ) -> Result<()> {
+        let model_dir = self.models_dir.join(&model_info.filename);
+
+        // Don't download if complete directory already exists with all files
+        if model_dir.exists() && model_dir.is_dir() {
+            let all_present = model_info
+                .download_files
+                .iter()
+                .all(|f| model_dir.join(&f.name).exists());
+            if all_present {
+                self.update_download_status()?;
+                return Ok(());
+            }
+        }
+
+        // Create the model directory
+        fs::create_dir_all(&model_dir)?;
+
+        // Mark as downloading
+        {
+            let mut models = self.available_models.lock().unwrap();
+            if let Some(model) = models.get_mut(model_id) {
+                model.is_downloading = true;
+            }
+        }
+
+        // Create cancellation flag
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        {
+            let mut flags = self.cancel_flags.lock().unwrap();
+            flags.insert(model_id.to_string(), cancel_flag.clone());
+        }
+
+        let total_size: u64 = model_info.download_files.iter().map(|f| f.size_bytes).sum();
+        let client = reqwest::Client::new();
+        let mut cumulative_downloaded: u64 = 0;
+        let mut last_emit = Instant::now();
+        let throttle_duration = Duration::from_millis(100);
+
+        // Sum up bytes already downloaded for completed files (for resume after restart)
+        for file in &model_info.download_files {
+            let file_path = model_dir.join(&file.name);
+            if file_path.exists() {
+                let existing_size = file_path.metadata().map(|m| m.len()).unwrap_or(0);
+                if existing_size == file.size_bytes && file.size_bytes > 0 {
+                    cumulative_downloaded += existing_size;
+                }
+            }
+        }
+
+        // Emit initial progress
+        let initial_progress = DownloadProgress {
+            model_id: model_id.to_string(),
+            downloaded: cumulative_downloaded,
+            total: total_size,
+            percentage: if total_size > 0 {
+                (cumulative_downloaded as f64 / total_size as f64) * 100.0
+            } else {
+                0.0
+            },
+        };
+        let _ = self
+            .app_handle
+            .emit("model-download-progress", &initial_progress);
+
+        for file in &model_info.download_files {
+            // Check cancellation
+            if cancel_flag.load(Ordering::Relaxed) {
+                info!("Download cancelled for: {}", model_id);
+                self.finish_download_state(model_id, false);
+                return Ok(());
+            }
+
+            let file_path = model_dir.join(&file.name);
+            let partial_path = model_dir.join(format!("{}.partial", &file.name));
+
+            // Skip if this file is already complete
+            if file_path.exists() {
+                let existing_size = file_path.metadata().map(|m| m.len()).unwrap_or(0);
+                if existing_size == file.size_bytes && file.size_bytes > 0 {
+                    info!("Skipping already downloaded file: {}", file.name);
+                    continue;
+                }
+                // File exists but wrong size — delete and re-download
+                let _ = fs::remove_file(&file_path);
+            }
+
+            // Check for partial download to resume
+            let mut resume_from = if partial_path.exists() {
+                let size = partial_path.metadata()?.len();
+                info!(
+                    "Resuming download of {} from byte {}",
+                    file.name, size
+                );
+                size
+            } else {
+                info!("Downloading {}", file.name);
+                0
+            };
+
+            let mut request = client.get(&file.url);
+            if resume_from > 0 {
+                request = request.header("Range", format!("bytes={}-", resume_from));
+            }
+
+            let mut response = request.send().await?;
+
+            // If server doesn't support range requests, restart
+            if resume_from > 0 && response.status() == reqwest::StatusCode::OK {
+                warn!(
+                    "Server doesn't support range requests for {}, restarting",
+                    file.name
+                );
+                drop(response);
+                let _ = fs::remove_file(&partial_path);
+                resume_from = 0;
+                response = client.get(&file.url).send().await?;
+            }
+
+            if !response.status().is_success()
+                && response.status() != reqwest::StatusCode::PARTIAL_CONTENT
+            {
+                self.finish_download_state(model_id, false);
+                return Err(anyhow::anyhow!(
+                    "Failed to download {}: HTTP {}",
+                    file.name,
+                    response.status()
+                ));
+            }
+
+            let mut downloaded_this_file = resume_from;
+            let mut stream = response.bytes_stream();
+
+            let mut out_file = if resume_from > 0 {
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&partial_path)?
+            } else {
+                std::fs::File::create(&partial_path)?
+            };
+
+            while let Some(chunk) = stream.next().await {
+                if cancel_flag.load(Ordering::Relaxed) {
+                    drop(out_file);
+                    info!("Download cancelled during {}", file.name);
+                    self.finish_download_state(model_id, false);
+                    return Ok(());
+                }
+
+                let chunk = chunk.map_err(|e| {
+                    self.finish_download_state(model_id, false);
+                    anyhow::anyhow!("Download error for {}: {}", file.name, e)
+                })?;
+
+                out_file.write_all(&chunk)?;
+                downloaded_this_file += chunk.len() as u64;
+
+                // Emit aggregate progress
+                let aggregate = cumulative_downloaded + downloaded_this_file;
+                if last_emit.elapsed() >= throttle_duration {
+                    let progress = DownloadProgress {
+                        model_id: model_id.to_string(),
+                        downloaded: aggregate,
+                        total: total_size,
+                        percentage: if total_size > 0 {
+                            (aggregate as f64 / total_size as f64) * 100.0
+                        } else {
+                            0.0
+                        },
+                    };
+                    let _ = self.app_handle.emit("model-download-progress", &progress);
+                    last_emit = Instant::now();
+                }
+            }
+
+            out_file.flush()?;
+            drop(out_file);
+
+            // Verify size if known
+            if file.size_bytes > 0 {
+                let actual_size = partial_path.metadata()?.len();
+                if actual_size != file.size_bytes {
+                    let _ = fs::remove_file(&partial_path);
+                    self.finish_download_state(model_id, false);
+                    return Err(anyhow::anyhow!(
+                        "Download incomplete for {}: expected {} bytes, got {}",
+                        file.name,
+                        file.size_bytes,
+                        actual_size
+                    ));
+                }
+            }
+
+            // Move partial to final
+            fs::rename(&partial_path, &file_path)?;
+            cumulative_downloaded += downloaded_this_file;
+
+            info!("Completed download of {}", file.name);
+        }
+
+        // Emit final 100% progress
+        let final_progress = DownloadProgress {
+            model_id: model_id.to_string(),
+            downloaded: total_size,
+            total: total_size,
+            percentage: 100.0,
+        };
+        let _ = self
+            .app_handle
+            .emit("model-download-progress", &final_progress);
+
+        // Update state
+        self.finish_download_state(model_id, true);
+
+        // Remove cancel flag
+        {
+            let mut flags = self.cancel_flags.lock().unwrap();
+            flags.remove(model_id);
+        }
+
+        let _ = self.app_handle.emit("model-download-complete", model_id);
+
+        info!(
+            "Successfully downloaded multi-file model {} to {:?}",
+            model_id, model_dir
+        );
+
+        Ok(())
+    }
+
+    /// Helper to update download state after a download completes or is cancelled.
+    fn finish_download_state(&self, model_id: &str, success: bool) {
+        let mut models = self.available_models.lock().unwrap();
+        if let Some(model) = models.get_mut(model_id) {
+            model.is_downloading = false;
+            if success {
+                model.is_downloaded = true;
+                model.partial_size = 0;
+            }
+        }
+    }
+
     pub fn delete_model(&self, model_id: &str) -> Result<()> {
         debug!("ModelManager: delete_model called for: {}", model_id);
 
@@ -1140,6 +1508,7 @@ mod tests {
                 is_recommended: false,
                 supported_languages: vec!["en".to_string()],
                 is_custom: false,
+                download_files: vec![],
             },
         );
 

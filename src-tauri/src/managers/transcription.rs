@@ -1,6 +1,7 @@
 use crate::audio_toolkit::{apply_custom_words, filter_transcription_output};
 use crate::managers::model::{EngineType, ModelManager};
 use crate::settings::{get_settings, ModelUnloadTimeout};
+use crate::voxtral_engine::VoxtralEngine;
 use anyhow::Result;
 use log::{debug, error, info, warn};
 use serde::Serialize;
@@ -37,6 +38,7 @@ enum LoadedEngine {
     Parakeet(ParakeetEngine),
     Moonshine(MoonshineEngine),
     SenseVoice(SenseVoiceEngine),
+    Voxtral(VoxtralEngine),
 }
 
 #[derive(Clone)]
@@ -151,6 +153,7 @@ impl TranscriptionManager {
                     LoadedEngine::Parakeet(ref mut e) => e.unload_model(),
                     LoadedEngine::Moonshine(ref mut e) => e.unload_model(),
                     LoadedEngine::SenseVoice(ref mut e) => e.unload_model(),
+                    LoadedEngine::Voxtral(ref mut e) => e.unload_model(),
                 }
             }
             *engine = None; // Drop the engine to free memory
@@ -310,6 +313,24 @@ impl TranscriptionManager {
                     })?;
                 LoadedEngine::SenseVoice(engine)
             }
+            EngineType::Voxtral => {
+                let mut engine = VoxtralEngine::new();
+                engine.load_model(&model_path).map_err(|e| {
+                    let error_msg =
+                        format!("Failed to load Voxtral model {}: {}", model_id, e);
+                    let _ = self.app_handle.emit(
+                        "model-state-changed",
+                        ModelStateEvent {
+                            event_type: "loading_failed".to_string(),
+                            model_id: Some(model_id.to_string()),
+                            model_name: Some(model_info.name.clone()),
+                            error: Some(error_msg.clone()),
+                        },
+                    );
+                    anyhow::anyhow!(error_msg)
+                })?;
+                LoadedEngine::Voxtral(engine)
+            }
         };
 
         // Update the current engine and model ID
@@ -468,6 +489,15 @@ impl TranscriptionManager {
                     sense_voice_engine
                         .transcribe_samples(audio, Some(params))
                         .map_err(|e| anyhow::anyhow!("SenseVoice transcription failed: {}", e))?
+                }
+                LoadedEngine::Voxtral(voxtral_engine) => {
+                    let text = voxtral_engine
+                        .transcribe_samples(audio)
+                        .map_err(|e| anyhow::anyhow!("Voxtral transcription failed: {}", e))?;
+                    transcribe_rs::TranscriptionResult {
+                        text,
+                        segments: None,
+                    }
                 }
             }
         };

@@ -2,9 +2,175 @@ fn main() {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     build_apple_intelligence_bridge();
 
+    build_voxtral();
+
     generate_tray_translations();
 
     tauri_build::build()
+}
+
+/// Build the voxtral C library for speech-to-text inference.
+///
+/// Compiles all voxtral C source files into a static library.
+/// On Linux: links Vulkan + OpenBLAS for GPU acceleration.
+/// On macOS aarch64: links Metal + Accelerate for GPU acceleration.
+/// On other platforms: links BLAS only (CPU).
+fn build_voxtral() {
+    use std::env;
+    use std::path::Path;
+
+    let voxtral_dir = Path::new("voxtral");
+    println!("cargo:rerun-if-changed=voxtral/");
+
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+
+    // Common C source files (no main.c, no mic files)
+    let c_sources = [
+        "voxtral.c",
+        "voxtral_encoder.c",
+        "voxtral_decoder.c",
+        "voxtral_kernels.c",
+        "voxtral_audio.c",
+        "voxtral_tokenizer.c",
+        "voxtral_safetensors.c",
+    ];
+
+    let mut build = cc::Build::new();
+    build
+        .warnings(false) // voxtral uses -Wextra style, lots of noise in cc
+        .opt_level_str("3")
+        .flag("-ffast-math");
+
+    // Add common sources
+    for src in &c_sources {
+        build.file(voxtral_dir.join(src));
+    }
+
+    // Platform-specific configuration
+    if target_os == "linux" {
+        // Linux: Vulkan + OpenBLAS
+        build
+            .define("USE_BLAS", None)
+            .define("USE_OPENBLAS", None)
+            .define("USE_VULKAN", None)
+            .define("USE_GPU", None)
+            .flag("-Wno-missing-field-initializers");
+
+        // Check for local OpenBLAS with AVX-512
+        let local_blas = Path::new("openblas-local");
+        if local_blas.join("lib/libopenblas.so").exists() {
+            build.include(local_blas.join("include"));
+        } else {
+            build.include("/usr/include/openblas");
+        }
+
+        // Add Vulkan source
+        build.file(voxtral_dir.join("voxtral_vulkan.c"));
+
+        // Link libraries
+        if local_blas.join("lib/libopenblas.so").exists() {
+            println!(
+                "cargo:rustc-link-search=native={}",
+                local_blas.join("lib").display()
+            );
+        }
+        println!("cargo:rustc-link-lib=openblas");
+        println!("cargo:rustc-link-lib=vulkan");
+        println!("cargo:rustc-link-lib=m");
+        println!("cargo:rustc-link-lib=pthread");
+    } else if target_os == "macos" && target_arch == "aarch64" {
+        // macOS Apple Silicon: Metal + Accelerate
+        build
+            .define("USE_BLAS", None)
+            .define("USE_METAL", None)
+            .define("USE_GPU", None)
+            .define("ACCELERATE_NEW_LAPACK", None);
+
+        // Generate the embedded Metal shader source header
+        let out_dir = env::var("OUT_DIR").unwrap();
+        let shader_source = std::fs::read_to_string(voxtral_dir.join("voxtral_shaders.metal"))
+            .expect("Failed to read voxtral_shaders.metal");
+        let shader_header_path =
+            Path::new(&out_dir).join("voxtral_shaders_source.h");
+
+        // Generate xxd-style C array
+        let mut header = String::new();
+        header.push_str("unsigned char voxtral_shaders_metal[] = {\n");
+        for (i, byte) in shader_source.as_bytes().iter().enumerate() {
+            if i > 0 {
+                header.push_str(", ");
+            }
+            if i % 12 == 0 {
+                header.push_str("\n  ");
+            }
+            header.push_str(&format!("0x{:02x}", byte));
+        }
+        header.push_str("\n};\n");
+        header.push_str(&format!(
+            "unsigned int voxtral_shaders_metal_len = {};\n",
+            shader_source.len()
+        ));
+        std::fs::write(&shader_header_path, header)
+            .expect("Failed to write shader header");
+
+        // Add Metal ObjC source with include path for generated header
+        build.include(&out_dir);
+
+        // Metal .m file needs to be compiled separately as ObjC
+        let mut metal_build = cc::Build::new();
+        metal_build
+            .warnings(false)
+            .opt_level_str("3")
+            .flag("-ffast-math")
+            .flag("-fobjc-arc")
+            .define("USE_BLAS", None)
+            .define("USE_METAL", None)
+            .define("USE_GPU", None)
+            .define("ACCELERATE_NEW_LAPACK", None)
+            .include(voxtral_dir)
+            .include(&out_dir)
+            .file(voxtral_dir.join("voxtral_metal.m"));
+        metal_build.compile("voxtral_metal");
+
+        // Link frameworks
+        println!("cargo:rustc-link-lib=framework=Accelerate");
+        println!("cargo:rustc-link-lib=framework=Metal");
+        println!("cargo:rustc-link-lib=framework=MetalPerformanceShaders");
+        println!("cargo:rustc-link-lib=framework=MetalPerformanceShadersGraph");
+        println!("cargo:rustc-link-lib=framework=Foundation");
+        println!("cargo:rustc-link-lib=m");
+    } else if target_os == "macos" {
+        // macOS x86_64: Accelerate only (no Metal GPU)
+        build
+            .define("USE_BLAS", None)
+            .define("ACCELERATE_NEW_LAPACK", None);
+
+        println!("cargo:rustc-link-lib=framework=Accelerate");
+        println!("cargo:rustc-link-lib=m");
+    } else if target_os == "windows" {
+        // Windows: Vulkan + OpenBLAS (TODO: test this)
+        build
+            .define("USE_BLAS", None)
+            .define("USE_OPENBLAS", None)
+            .define("USE_VULKAN", None)
+            .define("USE_GPU", None);
+
+        build.file(voxtral_dir.join("voxtral_vulkan.c"));
+
+        println!("cargo:rustc-link-lib=openblas");
+        println!("cargo:rustc-link-lib=vulkan");
+    } else {
+        // Fallback: CPU only
+        build.define("USE_BLAS", None);
+        println!("cargo:rustc-link-lib=m");
+    }
+
+    // Compile the main voxtral static library
+    build.include(voxtral_dir);
+    build.compile("voxtral");
+
+    println!("cargo:warning=Built voxtral C library for {}-{}", target_os, target_arch);
 }
 
 /// Generate tray menu translations from frontend locale files.

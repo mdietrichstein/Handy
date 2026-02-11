@@ -16,6 +16,8 @@ mod signal_handle;
 mod tray;
 mod tray_i18n;
 mod utils;
+mod voxtral_engine;
+mod voxtral_ffi;
 use specta_typescript::{BigIntExportBehavior, Typescript};
 use tauri_specta::{collect_commands, Builder};
 
