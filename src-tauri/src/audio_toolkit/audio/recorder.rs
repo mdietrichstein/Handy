@@ -254,6 +254,7 @@ fn run_consumer(
 
     let mut processed_samples = Vec::<f32>::new();
     let mut recording = false;
+    let mut frame_count: u64 = 0;
 
     // ---------- spectrum visualisation setup ---------------------------- //
     const BUCKETS: usize = 16;
@@ -271,9 +272,22 @@ fn run_consumer(
         recording: bool,
         vad: &Option<Arc<Mutex<Box<dyn vad::VoiceActivityDetector>>>>,
         out_buf: &mut Vec<f32>,
+        frame_count: &mut u64,
     ) {
         if !recording {
             return;
+        }
+
+        *frame_count += 1;
+
+        // Log audio level every 33 frames (~1 second at 30ms/frame) to diagnose silent mic
+        if *frame_count % 33 == 1 {
+            let max_amplitude = samples.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+            let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+            log::debug!(
+                "Audio frame #{}: max_amplitude={:.6}, rms={:.6}, samples={}",
+                frame_count, max_amplitude, rms, samples.len()
+            );
         }
 
         if let Some(vad_arc) = vad {
@@ -302,7 +316,7 @@ fn run_consumer(
 
         // ---------- existing pipeline ------------------------------------ //
         frame_resampler.push(&raw, &mut |frame: &[f32]| {
-            handle_frame(frame, recording, &vad, &mut processed_samples)
+            handle_frame(frame, recording, &vad, &mut processed_samples, &mut frame_count)
         });
 
         // non-blocking check for a command
@@ -310,6 +324,7 @@ fn run_consumer(
             match cmd {
                 Cmd::Start => {
                     processed_samples.clear();
+                    frame_count = 0;
                     recording = true;
                     visualizer.reset(); // Reset visualization buffer
                     if let Some(v) = &vad {
@@ -321,8 +336,9 @@ fn run_consumer(
 
                     frame_resampler.finish(&mut |frame: &[f32]| {
                         // we still want to process the last few frames
-                        handle_frame(frame, true, &vad, &mut processed_samples)
+                        handle_frame(frame, true, &vad, &mut processed_samples, &mut frame_count)
                     });
+                    log::debug!("Recording stopped: processed {} frames, {} speech samples", frame_count, processed_samples.len());
 
                     let _ = reply_tx.send(std::mem::take(&mut processed_samples));
                 }
