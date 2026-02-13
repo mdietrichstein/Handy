@@ -30,6 +30,7 @@ The process is entirely local:
 - Transcription uses your choice of models:
   - **Whisper models** (Small/Medium/Turbo/Large) with GPU acceleration when available
   - **Parakeet V3** - CPU-optimized model with excellent performance and automatic language detection
+  - **Voxtral 4B** - Mistral AI's realtime speech-to-text model with GPU acceleration (Vulkan/Metal)
 - Works on Windows, macOS, and Linux
 
 ## Quick Start
@@ -56,6 +57,7 @@ Handy is built as a Tauri application combining:
 - **Core Libraries**:
   - `whisper-rs`: Local speech recognition with Whisper models
   - `transcription-rs`: CPU-optimized speech recognition with Parakeet models
+  - `voxtral` (embedded C): Mistral AI Voxtral 4B inference with GPU acceleration
   - `cpal`: Cross-platform audio I/O
   - `vad-rs`: Voice Activity Detection
   - `rdev`: Global keyboard shortcuts and system events
@@ -150,6 +152,16 @@ The following are recommendations for running Handy on your own machine. If you 
 - **Performance**: ~5x real-time speed on mid-range hardware (tested on i5)
 - **Automatic language detection** - no manual language selection required
 
+**For Voxtral 4B Model:**
+
+- **Requires a GPU** — a discrete GPU with ≥12 GB VRAM is strongly recommended
+  - **Linux**: Vulkan-capable GPU (NVIDIA, AMD, Intel Arc)
+  - **macOS**: Apple Silicon (M1 or later, Metal acceleration)
+- **~8.9 GB download** — model weights are bf16 safetensors from [HuggingFace](https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602)
+- **~10 GB RAM/VRAM** in use at runtime (weights + KV caches + activations)
+- Integrated GPUs (e.g. AMD Radeon 760M, Intel Iris) technically work but will be significantly slower than smaller models like Parakeet due to the 4B parameter count and autoregressive decoder
+- Supports 99+ languages via the Tekken tokenizer
+
 ## Roadmap & Active Development
 
 We're actively working on several features and improvements. Contributions and feedback are welcome!
@@ -228,6 +240,14 @@ Download the models you want from below
 - V2 (473 MB): `https://blob.handy.computer/parakeet-v2-int8.tar.gz`
 - V3 (478 MB): `https://blob.handy.computer/parakeet-v3-int8.tar.gz`
 
+**Voxtral 4B (3 files, ~8.9 GB total):**
+
+All files from: `https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602/resolve/main/`
+
+- `consolidated.safetensors` (~8.9 GB)
+- `tekken.json` (~14 MB)
+- `params.json` (~1 KB)
+
 #### Step 4: Install Models
 
 **For Whisper Models (.bin files):**
@@ -262,9 +282,23 @@ Final structure should look like:
     └── (config files)
 ```
 
+**For Voxtral 4B (3 individual files):**
+
+1. Create a `voxtral-model` directory inside `models`
+2. Place all 3 files directly into that directory
+
+```
+{app_data_dir}/models/
+└── voxtral-model/
+    ├── consolidated.safetensors
+    ├── tekken.json
+    └── params.json
+```
+
 **Important Notes:**
 
 - For Parakeet models, the extracted directory name **must** match exactly as shown above
+- For Voxtral, the directory **must** be named `voxtral-model`
 - Do not rename the `.bin` files for Whisper models—use the exact filenames from the download URLs
 - After placing the files, restart Handy to detect the new models
 
@@ -321,6 +355,12 @@ The goal is to create both a useful tool and a foundation for others to build up
 - **[Handy CLI](https://github.com/cjpais/handy-cli)** - The original Python command-line version
 - **[handy.computer](https://handy.computer)** - Project website with demos and documentation
 
+## Changes from Upstream
+
+This fork adds **Voxtral 4B** ([Mistral AI Voxtral Realtime 4B](https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602)) as a transcription engine. Voxtral is a 4-billion parameter encoder-decoder speech-to-text model that supports 99+ languages with high accuracy.
+
+The voxtral code is based on [Voxtral.c](https://github.com/antirez/voxtral.c) and has been ported to Linux/Vulkan with the help of [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent).
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
@@ -329,6 +369,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 - **Whisper** by OpenAI for the speech recognition model
 - **whisper.cpp and ggml** for amazing cross-platform whisper inference/acceleration
+- **Mistral AI** for the Voxtral Realtime 4B speech-to-text model
 - **Silero** for great lightweight VAD
 - **Tauri** team for the excellent Rust-based app framework
 - **Community contributors** helping make Handy better
