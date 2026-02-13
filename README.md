@@ -1,10 +1,30 @@
-# Handy
+# Handy (Fork)
+
+> **This is a fork of [cjpais/Handy](https://github.com/cjpais/Handy)** with additional features and Linux/Wayland fixes.
 
 [![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/WVBeWsNXK4)
 
 **A free, open source, and extensible speech-to-text application that works completely offline.**
 
 Handy is a cross-platform desktop application built with Tauri (Rust + React/TypeScript) that provides simple, privacy-focused speech transcription. Press a shortcut, speak, and have your words appear in any text field—all without sending your voice to the cloud.
+
+## Fork Changes
+
+This fork includes the following changes on top of upstream [cjpais/Handy](https://github.com/cjpais/Handy):
+
+### Voxtral 4B Support
+
+Adds **Voxtral 4B** ([Mistral AI Voxtral Realtime 4B](https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602)) as a transcription engine. Voxtral is a 4-billion parameter encoder-decoder speech-to-text model that supports 99+ languages with high accuracy.
+
+The voxtral code is based on [Voxtral.c](https://github.com/antirez/voxtral.c) and has been ported to Linux/Vulkan with the help of [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent).
+
+### Linux/Wayland Fixes
+
+- **Global shortcuts now work on Wayland**: Tauri's global-shortcut plugin uses X11 `XGrabKey` which silently fails on Wayland. This fork automatically uses the `HandyKeys` backend (via `rdev`/evdev) on Wayland, which works regardless of display server.
+- **Paste tool fallback chain**: When a text input tool (e.g. `wtype`) is installed but fails at runtime (common on GNOME Wayland), the app now gracefully falls through to the next available tool (`dotool` → `ydotool` → `enigo`) instead of failing immediately.
+- **Improved debug logging**: Added logging for shortcut press/release events and audio recording levels to help diagnose issues.
+
+---
 
 ## Why Handy?
 
@@ -354,12 +374,6 @@ The goal is to create both a useful tool and a foundation for others to build up
 
 - **[Handy CLI](https://github.com/cjpais/handy-cli)** - The original Python command-line version
 - **[handy.computer](https://handy.computer)** - Project website with demos and documentation
-
-## Changes from Upstream
-
-This fork adds **Voxtral 4B** ([Mistral AI Voxtral Realtime 4B](https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602)) as a transcription engine. Voxtral is a 4-billion parameter encoder-decoder speech-to-text model that supports 99+ languages with high accuracy.
-
-The voxtral code is based on [Voxtral.c](https://github.com/antirez/voxtral.c) and has been ported to Linux/Vulkan with the help of [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent).
 
 ## License
 
